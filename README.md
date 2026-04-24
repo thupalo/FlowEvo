@@ -83,3 +83,19 @@ python -m src.alfworld_.run_20task_validation \
 Supported ALFWorld conditions: `pure_dynamic`, `compile_only`, `layer1_only`,
 `layer1_2`, `layer1_3`, `full_library`, `reflexion`, `expel`, `no_governance`,
 `adas`.
+
+## Citation
+
+If you use FlowEvo in your research, please cite our paper:
+
+```bibtex
+@misc{ren2026flowevo,
+  title        = {FlowEvo: Self-Evolving Agents through the Co-Evolution of Workflows and Executable Skills},
+  author       = {Ren, Zeyu and Yue, Ling and Li, Ran and Wang, Yishu and Xu, Shengxiang and Liu, Hanmo and Pan, Shaowu and Di, Shimin},
+  year         = {2026},
+  note         = {Preprint, under review},
+  howpublished = {\url{https://www.researchgate.net/publication/404123514_FlowEvo_Self-Evolving_Agents_through_the_Co-Evolution_of_Workflows_and_Executable_Skills}}
+}
+```
+
+Paper: [ResearchGate — FlowEvo (publication 404123514)](https://www.researchgate.net/publication/404123514_FlowEvo_Self-Evolving_Agents_through_the_Co-Evolution_of_Workflows_and_Executable_Skills)
