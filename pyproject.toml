@@ -1,12 +1,11 @@
 [project]
 name = "flowevo"
 version = "0.1.0"
-description = "Public FlowEvo code release"
+description = "FlowEvo: self-evolving agents through the co-evolution of workflows and executable skills"
 requires-python = ">=3.9"
 dependencies = [
   "pydantic>=2.0",
   "datasets>=2.19.0",
-  "openai>=1.109.1",
   "PyYAML>=6.0",
   "requests>=2.31.0",
 ]

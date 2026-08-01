@@ -1,4 +1,6 @@
 llm:
-  # Optional override when your Codex auth cache is not at ~/.codex/auth.json.
-  # Copy this file to configs/local.yaml only if you need a local override.
-  # auth_file_path: /absolute/path/to/auth.json
+  # Copy this file to configs/local.yaml (git-ignored) to keep credentials
+  # out of version control. Values here override the base config selected
+  # via --config-path.
+  # api_key: "YOUR_OPENROUTER_API_KEY"
+  # model: openai/gpt-4o-mini

@@ -44,7 +44,7 @@ from alfworld_.executor import AlfWorldExecutor
 from alfworld_.generator import AlfWorldGenerator
 from alfworld_.param_extractor import ParamExtractor
 from alfworld_.skill_library import SkillLibrary
-from runtime.config import GenerationSettings, load_runtime_config
+from runtime.config import load_runtime_config
 from runtime.llm_client import LLMClient
 
 
@@ -96,15 +96,6 @@ CONDITIONS: dict[str, dict[str, Any]] = {
         "use_insight": True,
         "compile": True,
     },
-    "reflexion": {
-        "display": "Reflexion (self-reflection retry)",
-        "use_template": False,
-        "use_exemplar": False,
-        "use_insight": False,
-        "compile": False,
-        "reflexion": True,
-        "max_retries": 3,
-    },
     "expel": {
         "display": "ExpeL (exemplar + insight, no template)",
         "use_template": False,
@@ -119,44 +110,6 @@ CONDITIONS: dict[str, dict[str, Any]] = {
         "use_insight": True,
         "compile": True,
         "no_governance": True,
-    },
-    "adas": {
-        "display": "ADAS (optimized prompt, no skill library)",
-        "use_template": False,
-        "use_exemplar": False,
-        "use_insight": False,
-        "compile": False,
-        "static_directives": [
-            "Always check the task goal carefully before acting.",
-            "For pick-and-place: find the object first, then the target receptacle.",
-            "For cleaning: find object -> sinkbasin -> clean -> destination -> put.",
-            "For heating: find object -> microwave -> heat -> destination -> put.",
-            "For cooling: find object -> fridge -> cool -> destination -> put.",
-            "For examine in light: find object -> pick up -> go to lamp -> use lamp.",
-            "Search systematically: check likely locations (countertop, shelf, drawer, cabinet). "
-            "If not found, try numbered variants (shelf 1, shelf 2, shelf 3).",
-            "Always verify you are holding the object before trying to use or place it.",
-        ],
-    },
-    "aflow_sim": {
-        "display": "AFLOW-sim (optimized prompt + reflexion retry)",
-        "use_template": False,
-        "use_exemplar": False,
-        "use_insight": False,
-        "compile": False,
-        "reflexion": True,
-        "max_retries": 3,
-        "static_directives": [
-            "Always check the task goal carefully before acting.",
-            "For pick-and-place: find the object first, then the target receptacle.",
-            "For cleaning: find object -> sinkbasin -> clean -> destination -> put.",
-            "For heating: find object -> microwave -> heat -> destination -> put.",
-            "For cooling: find object -> fridge -> cool -> destination -> put.",
-            "For examine in light: find object -> pick up -> go to lamp -> use lamp.",
-            "Search systematically: check likely locations (countertop, shelf, drawer, cabinet). "
-            "If not found, try numbered variants (shelf 1, shelf 2, shelf 3).",
-            "Always verify you are holding the object before trying to use or place it.",
-        ],
     },
 }
 
@@ -355,7 +308,7 @@ def run_condition(
                     task.task_type, task.goal, obs, admissible,
                 )
 
-            # Static policy directives (e.g. ADAS optimized prompt)
+            # Optional static policy directives from the condition config
             static_dirs = cfg.get("static_directives")
 
             trace = executor.run(
@@ -368,54 +321,6 @@ def run_condition(
             )
 
             wall = time.time() - t0
-
-            # ---- Reflexion retry loop ----
-            reflexion_retries = 0
-            reflexion_extra_tokens = 0
-            if cfg.get("reflexion") and not trace.success:
-                max_retries = cfg.get("max_retries", 3)
-                reflections: list[str] = []
-
-                for _retry in range(max_retries):
-                    # Generate reflection from the failed trace
-                    ref_actions = ", ".join(trace.action_history[-10:])
-                    ref_prompt = (
-                        "You attempted a household task and failed.\n"
-                        "Task: %s\n"
-                        "Actions taken (last 10): %s\n"
-                        "Reflect on what went wrong and what to do "
-                        "differently. Be specific and concise "
-                        "(1-2 sentences)."
-                    ) % (task.goal, ref_actions)
-
-                    ref_settings = GenerationSettings(
-                        temperature=0.0, max_output_tokens=200,
-                    )
-                    ref_resp = llm.generate(
-                        instructions="You are a task reflection assistant.",
-                        input_text=ref_prompt,
-                        settings=ref_settings,
-                    )
-                    reflections.append(ref_resp.text.strip())
-                    reflexion_extra_tokens += (
-                        (ref_resp.prompt_tokens or 0)
-                        + (ref_resp.completion_tokens or 0)
-                    )
-
-                    # Reset env to same task and retry
-                    task, obs, admissible = env.reset_to_task(idx)
-                    trace = executor.run(
-                        task=task,
-                        initial_observation=obs,
-                        admissible_commands=admissible,
-                        policy_directives=reflections,
-                    )
-                    reflexion_extra_tokens += trace.llm_total_tokens_total
-                    reflexion_retries += 1
-                    wall = time.time() - t0
-
-                    if trace.success:
-                        break
 
             # Track Layer 1 utility
             if template is not None and best_layer == 1:
@@ -472,8 +377,6 @@ def run_condition(
                 ),
                 "failure_type": trace.failure_type or "",
                 "wall_time_s": round(wall, 2),
-                "reflexion_retries": reflexion_retries,
-                "reflexion_extra_tokens": reflexion_extra_tokens,
             }
 
             status = "PASS" if trace.success else "FAIL"

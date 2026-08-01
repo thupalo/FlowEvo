@@ -169,9 +169,9 @@ class AlfWorldEnv:
     def reset_to_task(self, target_index: int) -> tuple[AlfWorldTask, str, list[str]]:
         """Re-initialize and fast-forward to replay the task at *target_index*.
 
-        Used by Reflexion retry: after a failed episode, the env is fully
-        re-created and advanced to the same game so the agent can retry with
-        accumulated reflections.
+        Used to rerun a task from scratch: after a failed episode, the env is
+        fully re-created and advanced to the same game so a fresh attempt can
+        start from the initial state.
         """
         self._initialized = False
         self.initialize()

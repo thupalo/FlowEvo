@@ -3,8 +3,8 @@
 Conditions parallel ALFWorld's experimental design:
 - io_baseline: direct generation, no skill
 - cot_baseline: chain-of-thought generation
-- reflexion: generate → test → reflect → retry
 - full_library: compile successful solutions + reuse
+- ours: compile + reuse + adaptive escalation
 
 Usage::
 
@@ -50,36 +50,28 @@ CONDITIONS: dict[str, dict[str, Any]] = {
         "cot": False,
         "compile": False,
         "use_skill": False,
-        "reflexion": False,
+        "retry": False,
     },
     "cot_baseline": {
         "display": "CoT (chain-of-thought)",
         "cot": True,
         "compile": False,
         "use_skill": False,
-        "reflexion": False,
-    },
-    "reflexion": {
-        "display": "Reflexion (generate-test-reflect-retry)",
-        "cot": True,
-        "compile": False,
-        "use_skill": False,
-        "reflexion": True,
-        "max_retries": 3,
+        "retry": False,
     },
     "full_library": {
         "display": "Full Library (compile + reuse)",
         "cot": True,
         "compile": True,
         "use_skill": True,
-        "reflexion": False,
+        "retry": False,
     },
     "ours": {
-        "display": "Ours (compile + reuse + self-refine)",
+        "display": "Ours (compile + reuse + adaptive escalation)",
         "cot": True,
         "compile": True,
         "use_skill": True,
-        "reflexion": True,
+        "retry": True,
         "max_retries": 3,
     },
     "expel": {
@@ -87,24 +79,8 @@ CONDITIONS: dict[str, dict[str, Any]] = {
         "cot": True,
         "compile": False,
         "use_skill": False,
-        "reflexion": False,
+        "retry": False,
         "expel": True,
-    },
-    "aflow_sim": {
-        "display": "AFLOW-sim (generate-test-review-revise workflow)",
-        "cot": True,
-        "compile": False,
-        "use_skill": False,
-        "reflexion": True,
-        "max_retries": 3,
-    },
-    "adas_sim": {
-        "display": "ADAS-sim (optimized prompt, single shot)",
-        "cot": True,
-        "compile": False,
-        "use_skill": False,
-        "reflexion": False,
-        "adas": True,
     },
 }
 
@@ -415,11 +391,9 @@ def _expel_add_insight(
 
 
 _GEN_SETTINGS = GenerationSettings(temperature=0.0, max_output_tokens=2048)
-_GEN_ENSEMBLE = GenerationSettings(temperature=0.7, max_output_tokens=2048)
 _GEN_RETRY = GenerationSettings(temperature=0.2, max_output_tokens=2048)
 _GEN_L2 = GenerationSettings(temperature=0.5, max_output_tokens=2048)
 _GEN_L3 = GenerationSettings(temperature=0.7, max_output_tokens=2048)
-_REFLECT_SETTINGS = GenerationSettings(temperature=0.0, max_output_tokens=300)
 
 
 def run_condition(
@@ -483,41 +457,32 @@ def run_condition(
 
             is_code = task.benchmark in ("humaneval", "mbpp")
 
-            # V7: for ours + code, skip skill_context at Level 1 (low reuse
-            # on HumanEval/MBPP); retry (reflexion) still injects it.
+            # For ours + code, skip skill_context at Level 1 (direct reuse is
+            # rare on HumanEval/MBPP); the retry stages still inject it.
             skill_context_l1 = (
                 "" if (is_code and condition_name == "ours") else skill_context
             )
 
-            # Build prompt and generate
+            # Build prompt and generate (Level 1: greedy single shot)
             prompt = build_prompt(task, cot=cfg.get("cot", False),
                                   skill_context=skill_context_l1)
 
-            if True:
-                if cfg.get("adas"):
-                    gen_instructions = (
-                        "You are an expert Python programmer and mathematician. "
-                        "Write clean, efficient, and correct solutions. "
-                        "Handle edge cases carefully. "
-                        "Think about the problem systematically before answering."
-                    )
-                else:
-                    gen_instructions = "You are an expert programmer and mathematician."
-                resp = llm.generate(
-                    instructions=gen_instructions,
-                    input_text=prompt,
-                    settings=_GEN_SETTINGS,
-                )
-                total_tokens += (
-                    (resp.prompt_tokens or 0) + (resp.completion_tokens or 0)
-                )
-                if is_code:
-                    solution = extract_code(resp.text, task)
-                else:
-                    solution = resp.text.strip()
-                passed, feedback = verify(task, solution, sandbox)
+            gen_instructions = "You are an expert programmer and mathematician."
+            resp = llm.generate(
+                instructions=gen_instructions,
+                input_text=prompt,
+                settings=_GEN_SETTINGS,
+            )
+            total_tokens += (
+                (resp.prompt_tokens or 0) + (resp.completion_tokens or 0)
+            )
+            if is_code:
+                solution = extract_code(resp.text, task)
+            else:
+                solution = resp.text.strip()
+            passed, feedback = verify(task, solution, sandbox)
 
-            # V10: Level 2 mini-ensemble (2 candidates, temp=0.5, no skill)
+            # Level 2 mini-ensemble (2 candidates, temp=0.5, no skill).
             # Any passing candidate ends the stage early.
             if (is_code and condition_name == "ours") and not passed:
                 last_sol, last_fb = solution, feedback
@@ -539,15 +504,15 @@ def run_condition(
                 if not passed:
                     solution, feedback = last_sol, last_fb
 
-            # Reflexion retry
+            # Retry on verification failure (Levels 3 and 4)
             retries = 0
             effective_max_retries = cfg.get("max_retries", 3)
             if is_code and condition_name == "ours":
-                effective_max_retries = 2  # v9: Level 3 (temp=0.7) + Level 4 (temp=0.2)
+                effective_max_retries = 2  # Level 3 (temp=0.7) + Level 4 (temp=0.2)
 
-            if cfg.get("reflexion") and not passed:
+            if cfg.get("retry") and not passed:
                 for retry in range(effective_max_retries):
-                    # Build reflexion prompt (code-specific vs math)
+                    # Build retry prompt (code-specific vs math)
                     ref_parts = []
                     if skill_context:
                         ref_parts.append(
@@ -579,7 +544,7 @@ def run_condition(
                     ref_prompt = "\n".join(ref_parts)
 
                     if is_code and condition_name == "ours":
-                        # V9: Level 3 temp=0.7, Level 4 temp=0.2
+                        # Level 3 temp=0.7, Level 4 temp=0.2
                         retry_settings = _GEN_L3 if retry == 0 else _GEN_RETRY
                     else:
                         retry_settings = _GEN_SETTINGS

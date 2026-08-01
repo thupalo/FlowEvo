@@ -14,7 +14,7 @@ class RuntimeConfigError(RuntimeError):
     """Raised when runtime configuration is missing or invalid."""
 
 
-SUPPORTED_PROVIDERS = {"openai-codex", "openrouter"}
+SUPPORTED_PROVIDERS = {"openrouter"}
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,6 @@ class SkillContextBudgets:
 class RuntimeLLMConfig:
     provider: str
     api_key: str
-    auth_file_path: str
     base_url: str
     model: str
     app_name: str
@@ -81,12 +80,11 @@ def _resolve_path(root: Path, config_dir: Path, raw_path: str | None) -> Path | 
 
 def _env_overrides() -> dict[str, Any]:
     llm: dict[str, Any] = {}
-    provider = os.getenv("IMPROVING_AGENT_PROVIDER")
-    model = os.getenv("IMPROVING_AGENT_MODEL")
-    base_url = os.getenv("IMPROVING_AGENT_BASE_URL")
-    app_name = os.getenv("IMPROVING_AGENT_APP_NAME")
-    auth_file_path = os.getenv("IMPROVING_AGENT_CODEX_AUTH_FILE")
-    skill_top_k = os.getenv("IMPROVING_AGENT_SKILL_TOP_K")
+    provider = os.getenv("FLOWEVO_PROVIDER")
+    model = os.getenv("FLOWEVO_MODEL")
+    base_url = os.getenv("FLOWEVO_BASE_URL")
+    app_name = os.getenv("FLOWEVO_APP_NAME")
+    skill_top_k = os.getenv("FLOWEVO_SKILL_TOP_K")
     if provider:
         llm["provider"] = provider
     if model:
@@ -95,42 +93,9 @@ def _env_overrides() -> dict[str, Any]:
         llm["base_url"] = base_url
     if app_name:
         llm["app_name"] = app_name
-    if auth_file_path:
-        llm["auth_file_path"] = auth_file_path
     if skill_top_k:
         llm["skill_top_k"] = int(skill_top_k)
     return {"llm": llm} if llm else {}
-
-
-def _codex_auth_error(*, path: Path | None, searched: list[Path] | None = None) -> RuntimeConfigError:
-    location = str(path) if path is not None else ", ".join(str(item) for item in (searched or []))
-    return RuntimeConfigError(
-        "Missing local Codex auth cache for `openai-codex`. "
-        f"Checked: {location}. "
-        "Run `codex` or `codex login`, set `cli_auth_credentials_store = \"file\"` if needed, "
-        "and verify `~/.codex/auth.json` exists and contains `.tokens.refresh_token`."
-    )
-
-
-def _resolve_codex_auth_path(root: Path, config_dir: Path, raw_path: str | None) -> Path:
-    if raw_path:
-        resolved = _resolve_path(root, config_dir, raw_path)
-        assert resolved is not None
-        if not resolved.exists():
-            raise _codex_auth_error(path=resolved)
-        return resolved
-
-    candidates: list[Path] = []
-    codex_home = os.getenv("CODEX_HOME")
-    if codex_home:
-        candidates.append(Path(codex_home) / "auth.json")
-    candidates.append(Path.home() / ".codex" / "auth.json")
-
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-
-    raise _codex_auth_error(path=None, searched=candidates)
 
 
 def load_runtime_config(
@@ -210,25 +175,12 @@ def load_runtime_config(
     if not model_value:
         raise RuntimeConfigError("Missing runtime model.")
 
-    auth_file_path = ""
-    if provider_value == "openai-codex":
-        if not app_name_value:
-            raise RuntimeConfigError("Missing runtime app_name.")
-        auth_file_path = str(
-            _resolve_codex_auth_path(
-                root=root,
-                config_dir=config_dir,
-                raw_path=str(llm.get("auth_file_path", "")).strip() or None,
-            )
-        )
-
     budgets = llm.get("skill_context_budgets") or {}
     draft_cfg = llm.get("draft") or {}
     repair_cfg = llm.get("repair") or {}
     return RuntimeLLMConfig(
         provider=provider_value,
         api_key=api_key,
-        auth_file_path=auth_file_path,
         base_url=base_url_value,
         model=model_value,
         app_name=app_name_value,
