@@ -2,7 +2,11 @@
 
 **Self-Evolving Agents through the Co-Evolution of Workflows and Executable Skills**
 
-Accepted at the Conference on Language Modeling (COLM) 2026.
+Published as a conference paper at the Third Conference on Language Modeling
+(COLM) 2026.
+
+**Paper:** [COLM 2026 (OpenReview)](https://openreview.net/forum?id=hU2N7IIkcE)
+&nbsp;|&nbsp; [arXiv:2607.21596](https://arxiv.org/abs/2607.21596)
 
 ![FlowEvo Overview](overview_framework.png)
 
@@ -90,9 +94,17 @@ If you use FlowEvo in your research, please cite our paper:
 
 ```bibtex
 @inproceedings{ren2026flowevo,
-  title     = {FlowEvo: Self-Evolving Agents through the Co-Evolution of Workflows and Executable Skills},
-  author    = {Ren, Zeyu and Yue, Ling and Li, Ran and Wang, Yishu and Xu, Shengxiang and Liu, Hanmo and Pan, Shaowu and Di, Shimin},
-  booktitle = {Conference on Language Modeling (COLM)},
-  year      = {2026}
+  title         = {FlowEvo: Self-Evolving Agents through the Co-Evolution of Workflows and Executable Skills},
+  author        = {Ren, Zeyu and Yue, Ling and Li, Ran and Wang, Yishu and Xu, Shengxiang and Liu, Hanmo and Pan, Shaowu and Di, Shimin},
+  booktitle     = {Third Conference on Language Modeling (COLM)},
+  year          = {2026},
+  address       = {San Francisco, CA, USA},
+  url           = {https://openreview.net/forum?id=hU2N7IIkcE},
+  eprint        = {2607.21596},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI}
 }
 ```
+
+COLM proceedings are published on OpenReview and are not assigned DOIs, so the
+entry carries the OpenReview `url` in place of a `doi` field.
