@@ -14,7 +14,16 @@ class RuntimeConfigError(RuntimeError):
     """Raised when runtime configuration is missing or invalid."""
 
 
-SUPPORTED_PROVIDERS = {"openrouter"}
+# Both names select the OpenAI chat-completions protocol. `openrouter` is the
+# historical name; `openai_compatible` makes it explicit that any compatible
+# server (vLLM, llama.cpp, LM Studio, Ollama, Azure/OpenAI proxies) works by
+# pointing `base_url` at it.
+SUPPORTED_PROVIDERS = {"openrouter", "openai_compatible"}
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def is_openrouter_endpoint(base_url: str) -> bool:
+    return "openrouter.ai" in str(base_url or "").lower()
 
 
 @dataclass(frozen=True)
@@ -165,16 +174,17 @@ def load_runtime_config(
     model_value = str(llm.get("model", "")).strip()
     app_name_value = str(llm.get("app_name", "") or "flowevo").strip()
 
-    if provider_value == "openrouter":
-        if not base_url_value:
-            base_url_value = "https://openrouter.ai/api/v1"
-        if not api_key:
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-        if not api_key:
-            raise RuntimeConfigError(
-                "OpenRouter provider requires an api_key in the config file "
-                "or OPENROUTER_API_KEY environment variable."
-            )
+    if provider_value == "openrouter" and not base_url_value:
+        base_url_value = OPENROUTER_BASE_URL
+    if not api_key:
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+    # Hosted OpenRouter always needs a key; self-hosted OpenAI-compatible
+    # servers usually ignore it, so only the hosted endpoint is strict.
+    if not api_key and is_openrouter_endpoint(base_url_value):
+        raise RuntimeConfigError(
+            "The openrouter.ai endpoint requires an api_key in the config file "
+            "or the OPENROUTER_API_KEY environment variable."
+        )
 
     if not base_url_value:
         raise RuntimeConfigError("Missing runtime base URL.")

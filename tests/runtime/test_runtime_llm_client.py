@@ -64,7 +64,7 @@ def post(monkeypatch):
     script: list = []
 
     def fake_post(url, headers=None, json=None, timeout=None):
-        calls.append({"url": url, "max_tokens": json["max_tokens"]})
+        calls.append({"url": url, "max_tokens": json["max_tokens"], "headers": dict(headers or {})})
         item = script.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -149,6 +149,25 @@ def test_http_error_carries_status_code(post):
         LLMClient(make_config()).generate(instructions="", input_text="q", settings=GenerationSettings(0.0, 100))
     assert ei.value.status_code == 401
     assert "HTTP 401" in str(ei.value)
+
+
+def test_openai_compatible_provider_and_local_headers(post):
+    script, calls = post
+    script.append(FakeResponse(200, chat("ok")))
+    cfg = make_config(provider="openai_compatible", api_key="", base_url="http://localhost:8000/v1")
+    resp = LLMClient(cfg).generate(instructions="", input_text="q", settings=GenerationSettings(0.0, 100))
+    assert resp.text == "ok"
+    h = calls[0]["headers"]
+    assert "Authorization" not in h and "HTTP-Referer" not in h and "X-Title" not in h
+
+
+def test_openrouter_endpoint_sends_attribution_headers(post):
+    script, calls = post
+    script.append(FakeResponse(200, chat("ok")))
+    cfg = make_config(base_url="https://openrouter.ai/api/v1", api_key="k")
+    LLMClient(cfg).generate(instructions="", input_text="q", settings=GenerationSettings(0.0, 100))
+    h = calls[0]["headers"]
+    assert h["Authorization"] == "Bearer k" and h["X-Title"] == "t" and "HTTP-Referer" in h
 
 
 def test_transient_status_is_retried_then_succeeds(post):

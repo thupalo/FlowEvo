@@ -107,8 +107,8 @@ class LLMClient:
         return (self.CONNECT_TIMEOUT_SECONDS, self.REQUEST_TIMEOUT_SECONDS)
 
     def generate(self, *, instructions: str, input_text: str, settings: GenerationSettings) -> LLMResponse:
-        if self.config.provider == "openrouter":
-            return self._generate_openrouter(
+        if self.config.provider in ("openrouter", "openai_compatible"):
+            return self._generate_openai_chat(
                 instructions=instructions,
                 input_text=input_text,
                 settings=settings,
@@ -117,8 +117,21 @@ class LLMClient:
             "Unsupported provider `%s` at generation time." % self.config.provider
         )
 
+    def _request_headers(self) -> dict[str, str]:
+        from runtime.config import is_openrouter_endpoint
+
+        headers = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = "Bearer %s" % self.config.api_key
+        # App-attribution headers are an OpenRouter feature; other servers
+        # ignore them, but keep requests clean for them.
+        if is_openrouter_endpoint(self.config.base_url):
+            headers["HTTP-Referer"] = "https://github.com/DEFENSE-SEU/FlowEvo"
+            headers["X-Title"] = self.config.app_name or "FlowEvo"
+        return headers
+
     # ------------------------------------------------------------------
-    # OpenRouter (OpenAI Chat Completions compatible)
+    # OpenAI Chat Completions protocol (OpenRouter, vLLM, llama.cpp, ...)
     # ------------------------------------------------------------------
 
     def _post_with_retries(self, url: str, headers: dict[str, str], payload: dict[str, object]) -> dict:
@@ -170,7 +183,7 @@ class LLMClient:
             status_code=last_status,
         )
 
-    def _generate_openrouter(
+    def _generate_openai_chat(
         self, *, instructions: str, input_text: str, settings: GenerationSettings,
     ) -> LLMResponse:
         effective_instructions = (instructions.strip() or DEFAULT_SYSTEM_INSTRUCTIONS)
@@ -185,12 +198,7 @@ class LLMClient:
             "max_tokens": settings.max_output_tokens,
         }
         url = "%s/chat/completions" % self.config.base_url.rstrip("/")
-        headers = {
-            "Authorization": "Bearer %s" % self.config.api_key,
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/DEFENSE-SEU/FlowEvo",
-            "X-Title": self.config.app_name or "FlowEvo",
-        }
+        headers = self._request_headers()
         started = time.perf_counter()
 
         grow = bool(getattr(self.config, "grow_on_truncation", False))
