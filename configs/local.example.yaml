@@ -2,5 +2,30 @@ llm:
   # Copy this file to configs/local.yaml (git-ignored) to keep credentials
   # out of version control. Values here override the base config selected
   # via --config-path.
+
+  # --- Hosted OpenRouter (the paper setup) ---------------------------------
   # api_key: "YOUR_OPENROUTER_API_KEY"
   # model: openai/gpt-4o-mini
+
+  # --- Local / self-hosted OpenAI-compatible server ------------------------
+  # vLLM, llama.cpp, LM Studio, Ollama, ... Only base_url and model are
+  # needed; api_key may be omitted for servers that ignore it.
+  # provider: openai_compatible
+  # base_url: http://localhost:8000/v1
+  # model: my-served-model-name
+
+  # --- Reasoning models (Nemotron, DeepSeek-R1, Qwen-thinking, ...) --------
+  # They spend output tokens on hidden reasoning before the answer. Give them
+  # room, or let the client grow the budget when a reply is cut off
+  # (finish_reason == "length" with empty content). Off by default so the
+  # published experiment numbers are unaffected.
+  # draft:
+  #   max_output_tokens: 4096
+  # repair:
+  #   max_output_tokens: 4096
+  # grow_on_truncation: true
+  # max_output_tokens_cap: 16384
+  # alfworld:
+  #   step_max_output_tokens: 2048
+  #   compile_max_output_tokens: 2048
+  #   strategy_max_output_tokens: 1024

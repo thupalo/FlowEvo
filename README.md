@@ -61,6 +61,44 @@ cp configs/local.example.yaml configs/local.yaml
 The API key can also be supplied via the `OPENROUTER_API_KEY` environment
 variable.
 
+### Local / self-hosted models
+
+The runtime speaks the OpenAI chat-completions protocol, so any compatible
+server (vLLM, llama.cpp, LM Studio, Ollama, …) works by pointing `base_url`
+at it in `configs/local.yaml`:
+
+```yaml
+llm:
+  provider: openai_compatible   # `openrouter` is accepted as an alias
+  base_url: http://localhost:8000/v1
+  model: my-served-model-name   # api_key may be omitted for local servers
+```
+
+### Reasoning models
+
+Models that emit hidden reasoning (Nemotron, DeepSeek-R1, Qwen-thinking, …)
+spend output tokens before writing the answer. With the default budgets
+(`draft.max_output_tokens: 900`; ALFWorld 256/500/200) the reply can come
+back with empty content and the runtime raises
+`LLMClientError: … returned empty content (finish_reason=length …)`.
+Raise `max_output_tokens` (and the `llm.alfworld` budgets), or set
+`grow_on_truncation: true` to let the client retry with a doubled budget.
+Both are off by default so published numbers are unaffected; see
+`configs/local.example.yaml`.
+
+### Quick check
+
+All runners accept `--limit N`; a five-task run verifies the setup before
+committing to a full benchmark:
+
+```bash
+python -m src.code_math.runner --benchmark humaneval --limit 5 \
+    --config-path configs/default.yaml --output-dir runs/smoke --conditions cot_baseline
+```
+
+Note: the root `.gitignore` excludes `/docs/`, `/results/`, `/analysis/` and
+similar runtime directories; put committed documentation elsewhere.
+
 ## Running code / math benchmarks
 
 ```bash
