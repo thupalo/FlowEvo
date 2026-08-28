@@ -88,6 +88,38 @@ python -m src.alfworld_.run_20task_validation \
 Supported ALFWorld conditions: `pure_dynamic`, `compile_only`, `layer1_only`,
 `layer1_2`, `layer1_3`, `full_library`, `expel`, and `no_governance`.
 
+## Running democase_sql
+
+[`democase_sql/`](democase_sql/) is a small, self-contained domain adapter
+that applies the same compile → replay → govern loop to natural-language
+questions over a SQLite database (e.g. *"get the address of customer X"*).
+It follows the ALFWorld adapter layout, needs no external dataset, and can
+run fully offline with an oracle generator.
+
+```bash
+# 1. build the deterministic demo database (customers, addresses, orders, ...)
+python -m democase_sql.db.build_db
+
+# 2. offline run with the oracle generator (no API key needed)
+python -m democase_sql.runner --generator oracle     --output-dir democase_sql/runs/oracle_demo     --conditions pure_dynamic layer1_only full_library ours
+
+# 3. real run through the configured LLM backend
+python -m democase_sql.runner --generator llm     --config-path configs/default.yaml     --output-dir democase_sql/runs/llm_demo     --conditions pure_dynamic ours
+
+# tests (offline)
+python -m pytest democase_sql/tests -q
+```
+
+Supported conditions: `pure_dynamic`, `compile_only`, `layer1_only`,
+`full_library`, `ours`, and `no_governance`. Each run writes per-episode
+traces, the compiled skill library (`skill_library.json`) and a `report.md`
+under `--output-dir`. Reasoning models need a larger output budget; use
+`--max-output-tokens 4096` (the default) or higher.
+
+See [`democase_sql/README.md`](democase_sql/README.md) for the design of the
+three skill layers, governance, error handling and how to point it at your
+own database.
+
 ## Citation
 
 If you use FlowEvo in your research, please cite our paper:
