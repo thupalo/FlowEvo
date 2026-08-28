@@ -101,16 +101,16 @@ Repro risk = does it change the numbers of an unchanged experiment run?
 
 | ID | Title | Files | Status | Repro risk | Origin |
 |---|---|---|---|---|---|
-| B-1 | Expose `finish_reason` and `reasoning` on `LLMResponse`; add `status_code` to `LLMClientError` | `src/runtime/llm_client.py` | branch `core/upstream-backlog` (f855278) | none (additive) | C-2026-08-25-a |
-| B-2 | Opt-in output-budget growth in `LLMClient.generate` (`finish_reason == "length"` with empty content → double `max_tokens` up to a cap) | `src/runtime/llm_client.py`, `src/runtime/config.py` | branch (f855278), `grow_on_truncation` default off | **yes if default-on** — shipped default-off | C-2026-08-25-a |
-| B-3 | `runtime/errors.py`: classify client failures (`empty_output`, `output_truncated`, `context_length`, `rate_limit`, `server_error`, `transport`, `auth`, `bad_request`, `malformed_response`) with `fatal`/`retryable` flags | `src/runtime/errors.py`; `democase_sql/errors.py` re-exports it | branch (f855278, 0a3c7f0) | none | C-2026-08-25-b |
-| B-4 | Experiment runners: abort on fatal error / N consecutive errors, persist partial results, exit codes, `failure_type` per episode | `src/code_math/runner.py`, `src/alfworld_/run_20task_validation.py` | branch (98daee6) | none | C-2026-08-25-b |
-| B-5 | ALFWorld / compiler output budgets (256, 500, 200) config-driven via `llm.alfworld` | `src/runtime/config.py`, `src/alfworld_/{generator,compiler,strategy_bank}.py` | branch (bf442d9), defaults unchanged | none with defaults | C-2026-08-25-a |
-| B-6 | Document local / reasoning-model setup in `configs/local.example.yaml` and README | `configs/local.example.yaml`, `README.md` | branch (7ae633c) | none | C-2026-08-25-a |
-| B-7 | Shared fail-closed fenced-block extractor used by `code_math.extract_code` | `src/core/utils.py`, `src/code_math/runner.py` | branch (24c805a) | low (failure category only) | C-2026-08-25-c |
-| B-8 | `alfworld` as an optional extra in `pyproject.toml` | `pyproject.toml`, `README.md` | branch (792e35a) | none | C-2026-08-24 |
-| B-9 | `openai_compatible` provider alias; OpenRouter headers / api_key only for openrouter.ai | `src/runtime/config.py`, `src/runtime/llm_client.py` | branch (40ede49) | none | C-2026-08-28 |
-| B-10 | `Sandbox` defaults to `sys.executable` instead of `python` on PATH | `src/env/sandbox.py` | branch (f2ccac7) | none (fixes silent divergence) | C-2026-08-28 |
+| B-1 | Expose `finish_reason` and `reasoning` on `LLMResponse`; add `status_code` to `LLMClientError` | `src/runtime/llm_client.py` | branch `core/upstream-backlog` (e7ba952) | none (additive) | C-2026-08-25-a |
+| B-2 | Opt-in output-budget growth in `LLMClient.generate` (`finish_reason == "length"` with empty content → double `max_tokens` up to a cap) | `src/runtime/llm_client.py`, `src/runtime/config.py` | branch (e7ba952), `grow_on_truncation` default off | **yes if default-on** — shipped default-off | C-2026-08-25-a |
+| B-3 | `runtime/errors.py`: classify client failures (`empty_output`, `output_truncated`, `context_length`, `rate_limit`, `server_error`, `transport`, `auth`, `bad_request`, `malformed_response`) with `fatal`/`retryable` flags | `src/runtime/errors.py`; `democase_sql/errors.py` re-exports it | branch (e7ba952, f46f24b) | none | C-2026-08-25-b |
+| B-4 | Experiment runners: abort on fatal error / N consecutive errors, persist partial results, exit codes, `failure_type` per episode | `src/code_math/runner.py`, `src/alfworld_/run_20task_validation.py` | branch (02e8a45) | none | C-2026-08-25-b |
+| B-5 | ALFWorld / compiler output budgets (256, 500, 200) config-driven via `llm.alfworld` | `src/runtime/config.py`, `src/alfworld_/{generator,compiler,strategy_bank}.py` | branch (2e440f7), defaults unchanged | none with defaults | C-2026-08-25-a |
+| B-6 | Document local / reasoning-model setup in `configs/local.example.yaml` and README | `configs/local.example.yaml`, `README.md` | branch (f62f5b9) | none | C-2026-08-25-a |
+| B-7 | Shared fail-closed fenced-block extractor used by `code_math.extract_code` | `src/core/utils.py`, `src/code_math/runner.py` | branch (848abc9) | low (failure category only) | C-2026-08-25-c |
+| B-8 | `alfworld` as an optional extra in `pyproject.toml` | `pyproject.toml`, `README.md` | branch (ff77f64) | none | C-2026-08-24 |
+| B-9 | `openai_compatible` provider alias; OpenRouter headers / api_key only for openrouter.ai | `src/runtime/config.py`, `src/runtime/llm_client.py` | branch (fc0a045) | none | C-2026-08-28 |
+| B-10 | `Sandbox` defaults to `sys.executable` instead of `python` on PATH | `src/env/sandbox.py` | branch (c32ee79) | none (fixes silent divergence) | C-2026-08-28 |
 
 Suggested order: B-1 → B-3 → B-2 → B-6, then B-4/B-5/B-7 as separate PRs.
 Everything with repro risk stays opt-in so the fork remains mergeable upstream.
