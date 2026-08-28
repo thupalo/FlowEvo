@@ -6,9 +6,9 @@ on the first 20 ALFWorld eval_out_of_distribution tasks.
 
 Usage::
 
-    cd src
-    conda run -n alfworld_eval --no-capture-output python -u \\
-        -m alfworld_.run_20task_validation \\
+    # from the repository root (inside the environment that has alfworld installed)
+    python -u \\
+        -m src.alfworld_.run_20task_validation \\
         --limit 20 --output-dir /tmp/20task_validation \\
         --config-path configs/default.yaml
 """

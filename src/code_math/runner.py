@@ -8,10 +8,10 @@ Conditions parallel ALFWorld's experimental design:
 
 Usage::
 
-    cd src
-    python -m code_math.runner \
+    # from the repository root
+    python -m src.code_math.runner \
         --benchmark humaneval --limit 10 \
-        --config-path ../configs/openrouter_4o_mini.yaml \
+        --config-path configs/default.yaml \
         --output-dir /tmp/code_test \
         --conditions io_baseline
 """
