@@ -101,14 +101,16 @@ Repro risk = does it change the numbers of an unchanged experiment run?
 
 | ID | Title | Files | Status | Repro risk | Origin |
 |---|---|---|---|---|---|
-| B-1 | Expose `finish_reason` and `reasoning` on `LLMResponse`; add `status_code` to `LLMClientError` | `src/runtime/llm_client.py` | planned | none (additive) | C-2026-08-25-a |
-| B-2 | Opt-in output-budget growth in `LLMClient.generate` (`finish_reason == "length"` or empty content → double `max_tokens` up to a cap) | `src/runtime/llm_client.py`, `src/runtime/config.py` | planned | **yes if default-on** — ship default-off | C-2026-08-25-a |
-| B-3 | `runtime/errors.py`: classify client failures (`empty_output`, `output_truncated`, `context_length`, `rate_limit`, `server_error`, `transport`, `auth`, `bad_request`, `malformed_response`) with `fatal`/`retryable` flags | new `src/runtime/errors.py` (port of `democase_sql/errors.py`) | planned | none | C-2026-08-25-b |
-| B-4 | Experiment runners: abort on fatal error / N consecutive errors, persist partial results, exit codes | `src/code_math/runner.py`, `src/alfworld_/run_20task_validation.py` | idea | none | C-2026-08-25-b |
-| B-5 | ALFWorld / compiler output budgets (256, 500) are unusable with reasoning models; make them config-driven | `src/alfworld_/generator.py:52`, `src/alfworld_/compiler.py:233` | idea | **yes** for ALFWorld numbers — config-driven with current defaults | C-2026-08-25-a |
-| B-6 | Document local / reasoning-model setup in `configs/local.example.yaml` and README | `configs/local.example.yaml`, `README.md` | idea | none | C-2026-08-25-a |
-| B-7 | Shared fenced-block extractor (`code_math.extract_code` and `democase_sql.extract_sql` duplicate the regex; both should fail closed) | `src/core/utils.py` | idea | low | C-2026-08-25-c |
-| B-8 | Pin `pip install alfworld` as an optional extra in `pyproject.toml` | `pyproject.toml` | idea | none | C-2026-08-24 |
+| B-1 | Expose `finish_reason` and `reasoning` on `LLMResponse`; add `status_code` to `LLMClientError` | `src/runtime/llm_client.py` | branch `core/upstream-backlog` (e7ba952) | none (additive) | C-2026-08-25-a |
+| B-2 | Opt-in output-budget growth in `LLMClient.generate` (`finish_reason == "length"` with empty content → double `max_tokens` up to a cap) | `src/runtime/llm_client.py`, `src/runtime/config.py` | branch (e7ba952), `grow_on_truncation` default off | **yes if default-on** — shipped default-off | C-2026-08-25-a |
+| B-3 | `runtime/errors.py`: classify client failures (`empty_output`, `output_truncated`, `context_length`, `rate_limit`, `server_error`, `transport`, `auth`, `bad_request`, `malformed_response`) with `fatal`/`retryable` flags | `src/runtime/errors.py`; `democase_sql/errors.py` re-exports it | branch (e7ba952, f46f24b) | none | C-2026-08-25-b |
+| B-4 | Experiment runners: abort on fatal error / N consecutive errors, persist partial results, exit codes, `failure_type` per episode | `src/code_math/runner.py`, `src/alfworld_/run_20task_validation.py` | branch (02e8a45) | none | C-2026-08-25-b |
+| B-5 | ALFWorld / compiler output budgets (256, 500, 200) config-driven via `llm.alfworld` | `src/runtime/config.py`, `src/alfworld_/{generator,compiler,strategy_bank}.py` | branch (2e440f7), defaults unchanged | none with defaults | C-2026-08-25-a |
+| B-6 | Document local / reasoning-model setup in `configs/local.example.yaml` and README | `configs/local.example.yaml`, `README.md` | branch (f62f5b9) | none | C-2026-08-25-a |
+| B-7 | Shared fail-closed fenced-block extractor used by `code_math.extract_code` | `src/core/utils.py`, `src/code_math/runner.py` | branch (848abc9) | low (failure category only) | C-2026-08-25-c |
+| B-8 | `alfworld` as an optional extra in `pyproject.toml` | `pyproject.toml`, `README.md` | branch (ff77f64) | none | C-2026-08-24 |
+| B-9 | `openai_compatible` provider alias; OpenRouter headers / api_key only for openrouter.ai | `src/runtime/config.py`, `src/runtime/llm_client.py` | branch (fc0a045) | none | C-2026-08-28 |
+| B-10 | `Sandbox` defaults to `sys.executable` instead of `python` on PATH | `src/env/sandbox.py` | branch (c32ee79) | none (fixes silent divergence) | C-2026-08-28 |
 
 Suggested order: B-1 → B-3 → B-2 → B-6, then B-4/B-5/B-7 as separate PRs.
 Everything with repro risk stays opt-in so the fork remains mergeable upstream.
@@ -194,6 +196,24 @@ git log --oneline --graph --decorate main upstream/main origin/main -5
 - `extract_sql` fallback `\bWITH\b` matched prose; returned `"with that."`
   as SQL. Fixed to require `SELECT` or `WITH x AS (` and to return `""`
   otherwise. `code_math.extract_code` has the same fence regex family. → B-7.
+
+### C-2026-08-28 — core backlog implemented on `core/upstream-backlog`
+- Nine commits, one per `upstream_issues/` item, ordered so each can be
+  cherry-picked into its own upstream PR. 70 tests (`tests/` + demo) pass.
+- While implementing: the `Sandbox()` default is used by `compiler/admission.py`
+  and `maintenance/governance.py` too, not only the code/math runner — so
+  skill admission and audits also ran under PATH `python`.
+- `alfworld` is imported lazily (`alfworld_/env.py:121`), so the missing
+  dependency surfaces at environment creation, not at import.
+- Verified against the local Nemotron server with the demo's full-schema
+  prompt and `max_tokens=150`: default config raises `LLMClientError`
+  (`finish_reason="length"`, classified `output_truncated`); with
+  `grow_on_truncation: true` the call succeeds after budget growth.
+- Found while verifying: at an intermediate budget the reply was *non-empty
+  but cut off mid-SQL* with `finish_reason="length"`. Growth must therefore
+  trigger on `finish_reason == "length"` regardless of content, not only on
+  empty content — fixed in the runtime; a short prompt (answer < budget)
+  does not reproduce the problem, so verify with a hard prompt.
 
 ### C-2026-08-25-d — adapter design decisions that held up
 - Literal → parameter compile with replay check admitted 9 templates in 31

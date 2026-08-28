@@ -229,8 +229,11 @@ Rules:"""
         )
 
         try:
-            from runtime.config import GenerationSettings  # local import to avoid cycles
-            settings = GenerationSettings(temperature=0.0, max_output_tokens=500)
+            from runtime.config import GenerationSettings, alfworld_budgets  # local import to avoid cycles
+            settings = GenerationSettings(
+                temperature=0.0,
+                max_output_tokens=alfworld_budgets(self.llm_client).compile_max_output_tokens,
+            )
             response = self.llm_client.generate(
                 instructions="You are a task analysis assistant. Extract concise procedural rules.",
                 input_text=prompt,

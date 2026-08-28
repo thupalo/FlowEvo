@@ -8,10 +8,10 @@ Conditions parallel ALFWorld's experimental design:
 
 Usage::
 
-    cd src
-    python -m code_math.runner \
+    # from the repository root
+    python -m src.code_math.runner \
         --benchmark humaneval --limit 10 \
-        --config-path ../configs/openrouter_4o_mini.yaml \
+        --config-path configs/default.yaml \
         --output-dir /tmp/code_test \
         --conditions io_baseline
 """
@@ -34,10 +34,16 @@ if _SRC not in sys.path:
 
 from code_math.loader import load_tasks
 from core.schemas import CodeTaskInstance
+from core.utils import extract_fenced_code
 from env.sandbox import Sandbox
 from eval.verifier import verify_humaneval, verify_function_task
-from runtime.config import GenerationSettings, load_runtime_config
-from runtime.llm_client import LLMClient
+from runtime.config import GenerationSettings, RuntimeConfigError, load_runtime_config
+from runtime.errors import LLMGenerationError, RunAborted
+from runtime.llm_client import LLMClient, LLMClientError
+
+# Abort a condition after this many *consecutive* error episodes (LLM or
+# unexpected failures, not verification failures).
+MAX_CONSECUTIVE_ERRORS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -234,20 +240,15 @@ def verify(
 # Code extraction from LLM output
 # ---------------------------------------------------------------------------
 
-_CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
-
-
 def extract_code(text: str, task: CodeTaskInstance) -> str:
     """Extract code from LLM output (handles markdown fences).
 
     Preserves leading indentation (critical for HumanEval function bodies).
+    Returns "" when the reply contains no code at all (refusal, prose,
+    reply truncated before the fence) so the verifier failure is recorded
+    as an empty output rather than as a wrong solution.
     """
-    m = _CODE_BLOCK_RE.search(text)
-    if m:
-        # lstrip('\n') removes leading blank lines but preserves indentation
-        return m.group(1).lstrip("\n").rstrip()
-    # Fallback: return as-is (strip only trailing whitespace)
-    return text.rstrip()
+    return extract_fenced_code(text, lang="python")
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +429,7 @@ def run_condition(
         start_idx = 0
 
     cum_pass = sum(1 for e in episodes if e.get("passed"))
+    consecutive_errors = 0
 
     # ExpeL: collect insights from prior episodes (online accumulation)
     expel_insights: list[str] = []
@@ -582,8 +584,12 @@ def run_condition(
                 "retries": retries,
                 "wall_time_s": round(wall, 2),
                 "feedback": feedback[:200],
+                "failure_type": (
+                    "" if passed else ("empty_output" if not solution.strip() else "verification_failed")
+                ),
                 "library_size": library.size if library else len(expel_insights),
             }
+            consecutive_errors = 0
 
             # ExpeL: accumulate insight from this episode
             if cfg.get("expel"):
@@ -601,8 +607,13 @@ def run_condition(
                    100 * cum_pass / (idx + 1))
             )
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             wall = time.time() - t0
+            if isinstance(exc, LLMClientError):
+                err = LLMGenerationError.from_client_error(exc)
+                failure_type, fatal = err.kind, err.fatal
+            else:
+                failure_type, fatal = "unexpected_error", False
             ep = {
                 "benchmark": benchmark,
                 "condition": condition_name,
@@ -613,9 +624,24 @@ def run_condition(
                 "retries": 0,
                 "wall_time_s": round(wall, 2),
                 "feedback": "error: %s" % str(exc)[:200],
+                "failure_type": failure_type,
                 "library_size": library.size if library else 0,
             }
-            print("  [%3d/%d] ERROR %s" % (idx + 1, len(tasks), str(exc)[:100]))
+            print("  [%3d/%d] ERROR [%s] %s" % (idx + 1, len(tasks), failure_type, str(exc)[:100]))
+            consecutive_errors += 1
+            if fatal or consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                episodes.append(ep)
+                if output_dir:
+                    _save_checkpoint(output_dir, condition_name, benchmark, episodes, library)
+                reason = (
+                    "fatal LLM error (%s)" % failure_type
+                    if fatal
+                    else "%d consecutive errors" % consecutive_errors
+                )
+                raise RunAborted(
+                    "%s/%s aborted after %d/%d episodes: %s -- %s"
+                    % (benchmark, condition_name, len(episodes), len(tasks), reason, str(exc)[:200])
+                ) from exc
 
         episodes.append(ep)
         if output_dir:
@@ -634,12 +660,18 @@ def _summary(eps: list[dict[str, Any]]) -> dict[str, Any]:
         return {}
     passed = sum(1 for e in eps if e["passed"])
     tokens = sum(e.get("tokens", 0) for e in eps)
+    failure_types: dict[str, int] = {}
+    for e in eps:
+        if not e["passed"]:
+            key = e.get("failure_type") or "verification_failed"
+            failure_types[key] = failure_types.get(key, 0) + 1
     return {
         "n": n,
         "passed": passed,
         "pass_rate": round(passed / n, 4),
         "avg_tokens": round(tokens / n, 1),
         "total_tokens": tokens,
+        "failure_types": dict(sorted(failure_types.items())),
     }
 
 
@@ -649,17 +681,20 @@ def generate_report(
 ) -> None:
     """Generate unified report across benchmarks × conditions."""
     lines = ["# Code/Math Benchmark Report\n"]
-    lines.append("| Benchmark | Condition | N | Pass | Rate | Avg Tokens |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("| Benchmark | Condition | N | Pass | Rate | Avg Tokens | Failure types |")
+    lines.append("|---|---|---|---|---|---|---|")
 
     flat_rows = []
     for bm, cond_eps in sorted(all_eps.items()):
         for cond, eps in sorted(cond_eps.items()):
             s = _summary(eps)
+            if not s:
+                continue
+            ft = ", ".join("%s:%d" % kv for kv in s["failure_types"].items()) or "-"
             lines.append(
-                "| %s | %s | %d | %d | %.0f%% | %.0f |"
+                "| %s | %s | %d | %d | %.0f%% | %.0f | %s |"
                 % (bm, cond, s["n"], s["passed"],
-                   s["pass_rate"] * 100, s["avg_tokens"])
+                   s["pass_rate"] * 100, s["avg_tokens"], ft)
             )
             flat_rows.extend(eps)
 
@@ -689,6 +724,12 @@ def generate_report(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """CLI entry. Exit codes: 0 ok, 1 run aborted (fatal LLM error or too many
+    consecutive errors; partial checkpoints are on disk), 2 configuration error."""
+    sys.exit(_main())
+
+
+def _main() -> int:
     parser = argparse.ArgumentParser(description="Code/Math benchmark runner")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
@@ -709,12 +750,17 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    base_config = load_runtime_config(config_path=args.config_path)
-    if args.model:
-        config = dataclasses.replace(base_config, model=args.model)
-    else:
-        config = base_config
-    llm = LLMClient(config=config)
+    try:
+        base_config = load_runtime_config(config_path=args.config_path)
+        if args.model:
+            config = dataclasses.replace(base_config, model=args.model)
+        else:
+            config = base_config
+        llm = LLMClient(config=config)
+    except (RuntimeConfigError, LLMClientError) as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        print("hint: set base_url / model / api_key in configs/local.yaml or export OPENROUTER_API_KEY.", file=sys.stderr)
+        return 2
 
     print("Code/Math Benchmark Runner")
     print("  Benchmarks: %s" % ", ".join(args.benchmark))
@@ -726,32 +772,39 @@ def main() -> None:
 
     all_eps: dict[str, dict[str, list[dict[str, Any]]]] = {}
     grand_t0 = time.time()
+    exit_code = 0
 
-    for bm in args.benchmark:
-        print("Loading %s..." % bm)
-        tasks = load_tasks(bm, limit=args.limit)
-        print("  %d tasks loaded" % len(tasks))
-        all_eps[bm] = {}
+    try:
+        for bm in args.benchmark:
+            print("Loading %s..." % bm)
+            tasks = load_tasks(bm, limit=args.limit)
+            print("  %d tasks loaded" % len(tasks))
+            all_eps[bm] = {}
 
-        for cond in args.conditions:
-            if cond not in CONDITIONS:
-                print("  [warn] Unknown condition '%s'" % cond)
-                continue
-            eps = run_condition(
-                bm, cond, CONDITIONS[cond], llm, tasks,
-                output_dir=output_dir,
-            )
-            all_eps[bm][cond] = eps
-            s = _summary(eps)
-            print(
-                "\n  >> %s/%s: %d/%d pass (%.0f%%), avg_tokens=%.0f\n"
-                % (bm, cond, s.get("passed", 0), s.get("n", 0),
-                   s.get("pass_rate", 0) * 100, s.get("avg_tokens", 0))
-            )
+            for cond in args.conditions:
+                if cond not in CONDITIONS:
+                    print("  [warn] Unknown condition '%s'" % cond)
+                    continue
+                eps = run_condition(
+                    bm, cond, CONDITIONS[cond], llm, tasks,
+                    output_dir=output_dir,
+                )
+                all_eps[bm][cond] = eps
+                s = _summary(eps)
+                print(
+                    "\n  >> %s/%s: %d/%d pass (%.0f%%), avg_tokens=%.0f\n"
+                    % (bm, cond, s.get("passed", 0), s.get("n", 0),
+                       s.get("pass_rate", 0) * 100, s.get("avg_tokens", 0))
+                )
+    except RunAborted as exc:
+        print("\nRUN ABORTED -- %s" % exc, file=sys.stderr)
+        print("Partial checkpoints are in %s; re-run the same command to resume." % output_dir, file=sys.stderr)
+        exit_code = 1
 
     grand_wall = time.time() - grand_t0
     print("\nTotal wall: %.0fs (%.1f min)" % (grand_wall, grand_wall / 60))
     generate_report(all_eps, output_dir)
+    return exit_code
 
 
 if __name__ == "__main__":

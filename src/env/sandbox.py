@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -10,14 +11,17 @@ from pathlib import Path
 class Sandbox:
     """Execute Python snippets in an isolated temporary file."""
 
-    def __init__(self, python_executable: str = "python", timeout_seconds: float = 5.0) -> None:
+    def __init__(self, python_executable: str | None = None, timeout_seconds: float = 5.0) -> None:
         """Initialize sandbox settings.
 
         Args:
-            python_executable: Python interpreter used for execution.
+            python_executable: Python interpreter used for execution. Defaults
+                to the interpreter running the experiment (``sys.executable``)
+                so candidate code sees the same environment and packages;
+                a bare ``"python"`` on PATH may resolve to a different install.
             timeout_seconds: Max wall-clock execution time.
         """
-        self.python_executable = python_executable
+        self.python_executable = python_executable or sys.executable
         self.timeout_seconds = timeout_seconds
 
     def run(self, code: str) -> dict:

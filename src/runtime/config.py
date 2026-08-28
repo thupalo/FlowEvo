@@ -14,7 +14,16 @@ class RuntimeConfigError(RuntimeError):
     """Raised when runtime configuration is missing or invalid."""
 
 
-SUPPORTED_PROVIDERS = {"openrouter"}
+# Both names select the OpenAI chat-completions protocol. `openrouter` is the
+# historical name; `openai_compatible` makes it explicit that any compatible
+# server (vLLM, llama.cpp, LM Studio, Ollama, Azure/OpenAI proxies) works by
+# pointing `base_url` at it.
+SUPPORTED_PROVIDERS = {"openrouter", "openai_compatible"}
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def is_openrouter_endpoint(base_url: str) -> bool:
+    return "openrouter.ai" in str(base_url or "").lower()
 
 
 @dataclass(frozen=True)
@@ -32,6 +41,26 @@ class SkillContextBudgets:
 
 
 @dataclass(frozen=True)
+class AlfWorldGenerationBudgets:
+    """Output-token budgets used by the ALFWorld adapter.
+
+    Defaults are the values the paper experiments used; raise them for
+    reasoning backbones that spend tokens on hidden thinking.
+    """
+
+    step_max_output_tokens: int = 256
+    compile_max_output_tokens: int = 500
+    strategy_max_output_tokens: int = 200
+
+
+def alfworld_budgets(llm_client: Any) -> AlfWorldGenerationBudgets:
+    """Budgets from an LLM client's config, or the defaults when unavailable
+    (e.g. a stub client in tests)."""
+    budgets = getattr(getattr(llm_client, "config", None), "alfworld", None)
+    return budgets if isinstance(budgets, AlfWorldGenerationBudgets) else AlfWorldGenerationBudgets()
+
+
+@dataclass(frozen=True)
 class RuntimeLLMConfig:
     provider: str
     api_key: str
@@ -44,6 +73,14 @@ class RuntimeLLMConfig:
     repair: GenerationSettings
     config_path: str
     local_override_path: str
+    # Opt-in: when a reply comes back with empty content and
+    # finish_reason == "length" (reasoning models exhausting max_tokens while
+    # thinking), retry with the output budget doubled, up to the cap.
+    # Default off so published experiment numbers are unaffected.
+    grow_on_truncation: bool = False
+    max_output_tokens_cap: int = 16384
+    # Optional `llm.alfworld` block; see AlfWorldGenerationBudgets.
+    alfworld: AlfWorldGenerationBudgets = AlfWorldGenerationBudgets()
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -159,16 +196,17 @@ def load_runtime_config(
     model_value = str(llm.get("model", "")).strip()
     app_name_value = str(llm.get("app_name", "") or "flowevo").strip()
 
-    if provider_value == "openrouter":
-        if not base_url_value:
-            base_url_value = "https://openrouter.ai/api/v1"
-        if not api_key:
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-        if not api_key:
-            raise RuntimeConfigError(
-                "OpenRouter provider requires an api_key in the config file "
-                "or OPENROUTER_API_KEY environment variable."
-            )
+    if provider_value == "openrouter" and not base_url_value:
+        base_url_value = OPENROUTER_BASE_URL
+    if not api_key:
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+    # Hosted OpenRouter always needs a key; self-hosted OpenAI-compatible
+    # servers usually ignore it, so only the hosted endpoint is strict.
+    if not api_key and is_openrouter_endpoint(base_url_value):
+        raise RuntimeConfigError(
+            "The openrouter.ai endpoint requires an api_key in the config file "
+            "or the OPENROUTER_API_KEY environment variable."
+        )
 
     if not base_url_value:
         raise RuntimeConfigError("Missing runtime base URL.")
@@ -178,6 +216,7 @@ def load_runtime_config(
     budgets = llm.get("skill_context_budgets") or {}
     draft_cfg = llm.get("draft") or {}
     repair_cfg = llm.get("repair") or {}
+    alfworld_cfg = llm.get("alfworld") or {}
     return RuntimeLLMConfig(
         provider=provider_value,
         api_key=api_key,
@@ -201,4 +240,11 @@ def load_runtime_config(
         ),
         config_path=str(config_file),
         local_override_path=str(override_path) if override_path is not None else "",
+        grow_on_truncation=bool(llm.get("grow_on_truncation", False)),
+        max_output_tokens_cap=int(llm.get("max_output_tokens_cap", 16384) or 16384),
+        alfworld=AlfWorldGenerationBudgets(
+            step_max_output_tokens=int(alfworld_cfg.get("step_max_output_tokens", 256)),
+            compile_max_output_tokens=int(alfworld_cfg.get("compile_max_output_tokens", 500)),
+            strategy_max_output_tokens=int(alfworld_cfg.get("strategy_max_output_tokens", 200)),
+        ),
     )
