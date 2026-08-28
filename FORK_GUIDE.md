@@ -113,6 +113,12 @@ Repro risk = does it change the numbers of an unchanged experiment run?
 Suggested order: B-1 → B-3 → B-2 → B-6, then B-4/B-5/B-7 as separate PRs.
 Everything with repro risk stays opt-in so the fork remains mergeable upstream.
 
+Ready-to-file upstream issue texts for these items live in
+[`upstream_issues/`](upstream_issues/README.md) (mapping: 01 = B-1/B-2/B-3,
+02 = provider naming, 03 = B-5, 04 = B-4, 05 = sandbox interpreter,
+06 = B-7, 07 = B-8, 08 = B-6, 09 = contributing `democase_sql/`).
+Update the backlog status column when an issue or PR is opened.
+
 ---
 
 ## Part D — Fork sync workflow
