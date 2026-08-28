@@ -34,6 +34,7 @@ if _SRC not in sys.path:
 
 from code_math.loader import load_tasks
 from core.schemas import CodeTaskInstance
+from core.utils import extract_fenced_code
 from env.sandbox import Sandbox
 from eval.verifier import verify_humaneval, verify_function_task
 from runtime.config import GenerationSettings, load_runtime_config
@@ -234,20 +235,15 @@ def verify(
 # Code extraction from LLM output
 # ---------------------------------------------------------------------------
 
-_CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
-
-
 def extract_code(text: str, task: CodeTaskInstance) -> str:
     """Extract code from LLM output (handles markdown fences).
 
     Preserves leading indentation (critical for HumanEval function bodies).
+    Returns "" when the reply contains no code at all (refusal, prose,
+    reply truncated before the fence) so the verifier failure is recorded
+    as an empty output rather than as a wrong solution.
     """
-    m = _CODE_BLOCK_RE.search(text)
-    if m:
-        # lstrip('\n') removes leading blank lines but preserves indentation
-        return m.group(1).lstrip("\n").rstrip()
-    # Fallback: return as-is (strip only trailing whitespace)
-    return text.rstrip()
+    return extract_fenced_code(text, lang="python")
 
 
 # ---------------------------------------------------------------------------

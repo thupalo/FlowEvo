@@ -209,3 +209,46 @@ def infer_task_pattern(task: BenchmarkTaskInstance) -> str:
     ) or entry_point.startswith("find"):
         return "predicate_or_search"
     return "mbpp_general"
+
+
+# ---------------------------------------------------------------------------
+# Fenced-code extraction (fail closed)
+# ---------------------------------------------------------------------------
+
+_FENCE_RE = re.compile(r"```([A-Za-z0-9_+-]*)[ \t]*\r?\n(.*?)```", re.DOTALL)
+_PY_CODE_LINE_RE = re.compile(
+    r"^\s*(?:@|(?:def|class|import|from|return|if|elif|else|for|while|try|except|finally|with|raise|pass|yield|lambda|assert|global|nonlocal|async|await)\b)"
+)
+
+
+def _looks_like_python(text: str) -> bool:
+    for line in text.splitlines():
+        if _PY_CODE_LINE_RE.match(line):
+            return True
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and ("=" in stripped or "(" in stripped) and not stripped.endswith("?"):
+            return True
+    return False
+
+
+def extract_fenced_code(text: str, *, lang: str = "python") -> str:
+    """Return the code an LLM reply contains, or ``""`` when it contains none.
+
+    1. The first fenced block whose tag is ``lang`` or empty (leading blank
+       lines dropped, indentation preserved — HumanEval bodies depend on it).
+    2. Otherwise any fenced block (models sometimes tag ``py`` or ``text``).
+    3. Otherwise the raw text, but only if it looks like code (a line starting
+       with a Python keyword / decorator, or containing ``=`` / ``(``).
+       Prose such as "I cannot help with that." yields ``""`` so callers can
+       record an *empty output* instead of sending prose to the sandbox.
+    """
+    blocks = list(_FENCE_RE.finditer(text or ""))
+    preferred = [m for m in blocks if m.group(1).lower() in ("", lang.lower())]
+    for m in preferred + [b for b in blocks if b not in preferred]:
+        body = m.group(2).lstrip("\n").rstrip()
+        if body:
+            return body
+    raw = (text or "").rstrip()
+    if lang.lower() == "python" and not _looks_like_python(raw):
+        return ""
+    return raw
