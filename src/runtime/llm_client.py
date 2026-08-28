@@ -16,7 +16,20 @@ DEFAULT_SYSTEM_INSTRUCTIONS = "You are a careful and precise assistant."
 
 
 class LLMClientError(RuntimeError):
-    """Raised when the LLM provider fails or returns invalid content."""
+    """Raised when the LLM provider fails or returns invalid content.
+
+    Attributes:
+        status_code: HTTP status when the failure came from a non-2xx reply,
+            otherwise ``None`` (transport error, empty content, bad JSON).
+        finish_reason: the provider's ``finish_reason`` when the failure is an
+            empty reply (e.g. ``"length"`` when a reasoning model exhausted
+            ``max_tokens`` while thinking), otherwise ``""``.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None, finish_reason: str = "") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.finish_reason = finish_reason
 
 
 @dataclass(frozen=True)
@@ -28,6 +41,8 @@ class LLMResponse:
     completion_tokens: int
     total_tokens: int
     latency_ms: float
+    finish_reason: str = ""
+    reasoning: str = ""
 
 
 class LLMClient:
@@ -38,6 +53,8 @@ class LLMClient:
     MAX_RETRIES = 4
     RETRY_BACKOFF_SECONDS = 2.0
     MAX_RETRY_AFTER_SECONDS = 30.0
+    # Output-budget growth (only when config.grow_on_truncation is True)
+    MAX_BUDGET_GROWTH_STEPS = 3
 
     def __init__(self, config: RuntimeLLMConfig) -> None:
         self.config = config
@@ -104,6 +121,55 @@ class LLMClient:
     # OpenRouter (OpenAI Chat Completions compatible)
     # ------------------------------------------------------------------
 
+    def _post_with_retries(self, url: str, headers: dict[str, str], payload: dict[str, object]) -> dict:
+        """POST once, retrying transient transport errors / statuses.
+
+        Returns the parsed JSON body. Raises ``LLMClientError`` carrying the
+        HTTP status for non-transient failures.
+        """
+        transient_retry_count = 0
+        last_error = "retry budget exhausted"
+        last_status: int | None = None
+
+        for _attempt in range(self.MAX_RETRIES + 1):
+            try:
+                response = requests.post(
+                    url, headers=headers, json=payload,
+                    timeout=self._request_timeout(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_error = self._sanitize("%s: %s" % (type(exc).__name__, exc))
+                last_status = None
+                if self._is_transient_transport_error(exc) and transient_retry_count < self.MAX_RETRIES:
+                    transient_retry_count += 1
+                    self._retry_backoff(transient_retry_count)
+                    continue
+                raise LLMClientError(last_error) from exc
+
+            if not response.ok:
+                last_status = int(response.status_code)
+                last_error = self._sanitize(
+                    "HTTP %d for %s. Body: %s" % (response.status_code, url, response.text[:500])
+                )
+                if self._is_transient_status(response.status_code) and transient_retry_count < self.MAX_RETRIES:
+                    transient_retry_count += 1
+                    self._retry_backoff(transient_retry_count, response=response)
+                    continue
+                raise LLMClientError(last_error, status_code=last_status)
+
+            try:
+                return response.json()
+            except Exception as exc:  # noqa: BLE001
+                raise LLMClientError(self._sanitize("Invalid JSON: %s" % response.text[:200])) from exc
+
+        raise LLMClientError(
+            self._sanitize(
+                "Exceeded retry limit after %d transient retries. Last error: %s"
+                % (transient_retry_count, last_error)
+            ),
+            status_code=last_status,
+        )
+
     def _generate_openrouter(
         self, *, instructions: str, input_text: str, settings: GenerationSettings,
     ) -> LLMResponse:
@@ -126,61 +192,68 @@ class LLMClient:
             "X-Title": self.config.app_name or "FlowEvo",
         }
         started = time.perf_counter()
-        transient_retry_count = 0
-        last_error = "retry budget exhausted"
 
-        for attempt in range(self.MAX_RETRIES + 1):
-            try:
-                response = requests.post(
-                    url, headers=headers, json=payload,
-                    timeout=self._request_timeout(),
-                )
-            except Exception as exc:  # noqa: BLE001
-                last_error = self._sanitize("%s: %s" % (type(exc).__name__, exc))
-                if self._is_transient_transport_error(exc) and transient_retry_count < self.MAX_RETRIES:
-                    transient_retry_count += 1
-                    self._retry_backoff(transient_retry_count)
-                    continue
-                raise LLMClientError(last_error) from exc
+        grow = bool(getattr(self.config, "grow_on_truncation", False))
+        cap = int(getattr(self.config, "max_output_tokens_cap", 16384) or 16384)
+        max_tokens = int(settings.max_output_tokens)
+        growth_steps = 0
 
-            if not response.ok:
-                last_error = self._sanitize(
-                    "HTTP %d for %s. Body: %s" % (response.status_code, url, response.text[:500])
-                )
-                if self._is_transient_status(response.status_code) and transient_retry_count < self.MAX_RETRIES:
-                    transient_retry_count += 1
-                    self._retry_backoff(transient_retry_count, response=response)
-                    continue
-                raise LLMClientError(last_error)
-
-            try:
-                data = response.json()
-            except Exception as exc:  # noqa: BLE001
-                raise LLMClientError(self._sanitize("Invalid JSON: %s" % response.text[:200])) from exc
+        while True:
+            payload["max_tokens"] = max_tokens
+            data = self._post_with_retries(url, headers, payload)
 
             choices = data.get("choices") or []
             text = ""
+            finish_reason = ""
+            reasoning = ""
             if choices:
-                message = choices[0].get("message") or {}
+                choice = choices[0] or {}
+                finish_reason = str(choice.get("finish_reason") or "")
+                message = choice.get("message") or {}
                 text = str(message.get("content") or "").strip()
-            if not text:
-                raise LLMClientError("OpenRouter returned empty content.")
+                # Reasoning models (vLLM, DeepSeek, OpenRouter) expose the
+                # hidden chain of thought under one of these keys.
+                reasoning = str(message.get("reasoning") or message.get("reasoning_content") or "")
 
-            usage = data.get("usage") or {}
-            latency_ms = (time.perf_counter() - started) * 1000.0
-            return LLMResponse(
-                text=text,
-                provider=self.config.provider,
-                model=self.config.model,
-                prompt_tokens=self._usage_int(usage, "prompt_tokens"),
-                completion_tokens=self._usage_int(usage, "completion_tokens"),
-                total_tokens=self._usage_int(usage, "total_tokens"),
-                latency_ms=latency_ms,
+            # finish_reason == "length" means the reply is incomplete, whether
+            # content is empty (a reasoning model spent the budget thinking)
+            # or cut off mid-answer. With growth enabled, retry with a bigger
+            # budget in both cases; otherwise return what we have (callers can
+            # inspect finish_reason) or raise when there is nothing at all.
+            can_grow = (
+                grow
+                and finish_reason == "length"
+                and growth_steps < self.MAX_BUDGET_GROWTH_STEPS
+                and max_tokens < cap
             )
+            if can_grow:
+                max_tokens = min(max_tokens * 2, cap)
+                growth_steps += 1
+                continue
 
-        raise LLMClientError(
-            self._sanitize(
-                "Exceeded retry limit after %d transient retries. Last error: %s"
-                % (transient_retry_count, last_error)
+            if text:
+                usage = data.get("usage") or {}
+                latency_ms = (time.perf_counter() - started) * 1000.0
+                return LLMResponse(
+                    text=text,
+                    provider=self.config.provider,
+                    model=self.config.model,
+                    prompt_tokens=self._usage_int(usage, "prompt_tokens"),
+                    completion_tokens=self._usage_int(usage, "completion_tokens"),
+                    total_tokens=self._usage_int(usage, "total_tokens"),
+                    latency_ms=latency_ms,
+                    finish_reason=finish_reason,
+                    reasoning=reasoning,
+                )
+
+            detail = ""
+            if finish_reason:
+                detail += " finish_reason=%s" % finish_reason
+            if reasoning:
+                detail += " reasoning_chars=%d" % len(reasoning)
+            if growth_steps:
+                detail += " after %d budget increases (max_tokens=%d)" % (growth_steps, max_tokens)
+            raise LLMClientError(
+                "OpenRouter returned empty content.%s" % detail,
+                finish_reason=finish_reason,
             )
-        )

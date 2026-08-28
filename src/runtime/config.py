@@ -44,6 +44,12 @@ class RuntimeLLMConfig:
     repair: GenerationSettings
     config_path: str
     local_override_path: str
+    # Opt-in: when a reply comes back with empty content and
+    # finish_reason == "length" (reasoning models exhausting max_tokens while
+    # thinking), retry with the output budget doubled, up to the cap.
+    # Default off so published experiment numbers are unaffected.
+    grow_on_truncation: bool = False
+    max_output_tokens_cap: int = 16384
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -201,4 +207,6 @@ def load_runtime_config(
         ),
         config_path=str(config_file),
         local_override_path=str(override_path) if override_path is not None else "",
+        grow_on_truncation=bool(llm.get("grow_on_truncation", False)),
+        max_output_tokens_cap=int(llm.get("max_output_tokens_cap", 16384) or 16384),
     )
