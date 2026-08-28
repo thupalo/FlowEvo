@@ -52,6 +52,17 @@ _PREFIX_RE = re.compile(r"^(\d+[\.\)]\s*|-\s*|>\s*)")
 _STEP_SETTINGS = GenerationSettings(temperature=0.0, max_output_tokens=256)
 
 
+def _step_settings(llm_client: Any) -> GenerationSettings:
+    """Per-step settings; the output budget comes from `llm.alfworld` in the
+    runtime config (default 256, the paper setting)."""
+    from runtime.config import alfworld_budgets
+
+    return GenerationSettings(
+        temperature=_STEP_SETTINGS.temperature,
+        max_output_tokens=alfworld_budgets(llm_client).step_max_output_tokens,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Generator
 # ---------------------------------------------------------------------------
@@ -93,7 +104,7 @@ class AlfWorldGenerator:
         resp = self._llm.generate(
             instructions=system,
             input_text=user,
-            settings=_STEP_SETTINGS,
+            settings=_step_settings(self._llm),
         )
         action = _parse_single_action(resp.text, admissible_commands)
         return AlfWorldStepOutput(

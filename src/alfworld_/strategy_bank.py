@@ -132,6 +132,16 @@ _HEURISTIC_STRATEGIES: dict[str, str] = {
 _STRATEGY_SETTINGS = GenerationSettings(temperature=0.2, max_output_tokens=200)
 
 
+def _strategy_settings(llm_client: Any) -> GenerationSettings:
+    """Budget from `llm.alfworld.strategy_max_output_tokens` (default 200)."""
+    from runtime.config import alfworld_budgets
+
+    return GenerationSettings(
+        temperature=_STRATEGY_SETTINGS.temperature,
+        max_output_tokens=alfworld_budgets(llm_client).strategy_max_output_tokens,
+    )
+
+
 def extract_strategy(
     trace: Any,
     llm_client: Any | None = None,
@@ -169,7 +179,7 @@ def extract_strategy(
             resp = llm_client.generate(
                 instructions="Extract reusable task strategies from execution traces.",
                 input_text=prompt,
-                settings=_STRATEGY_SETTINGS,
+                settings=_strategy_settings(llm_client),
             )
             tokens_used = (resp.prompt_tokens or 0) + (resp.completion_tokens or 0)
             text = resp.text.strip()
