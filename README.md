@@ -78,6 +78,13 @@ and `ours` (FlowEvo's compile + reuse + adaptive-escalation pipeline).
 
 ## Running ALFWorld
 
+ALFWorld is an optional extra; install it and download the game files once:
+
+```bash
+pip install -e ".[alfworld]"
+alfworld-download
+```
+
 ```bash
 python -m src.alfworld_.run_20task_validation \
     --config-path configs/default.yaml \
