@@ -33,10 +33,14 @@ from typing import Any
 HOLDOUT_RATE: float = 0.20  # fraction of episodes that skip injection
 AUDIT_INTERVAL: int = 20    # episodes between active periodic_audit calls
 HOLDOUT_RNG_SEED: int = 1337  # deterministic per-condition holdout schedule
+MAX_CONSECUTIVE_ERRORS: int = 3  # abort a condition after this many error episodes in a row
 
 _SRC = str(Path(__file__).resolve().parent.parent)
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
+
+from runtime.errors import LLMGenerationError, RunAborted
+from runtime.llm_client import LLMClientError
 
 from alfworld_.compiler import AlfWorldCompiler
 from alfworld_.env import AlfWorldEnv
@@ -259,6 +263,7 @@ def run_condition(
         start_idx = 0
 
     cum_success = sum(1 for e in episodes if e.get("success"))
+    consecutive_errors = 0
 
     for idx in range(start_idx, n_tasks):
         library.advance_episode()
@@ -410,6 +415,11 @@ def run_condition(
 
         except Exception as exc:  # noqa: BLE001
             wall = time.time() - t0
+            if isinstance(exc, LLMClientError):
+                err = LLMGenerationError.from_client_error(exc)
+                failure_type, fatal = err.kind, err.fatal
+            else:
+                failure_type, fatal = "unexpected_error", False
             ep = {
                 "condition": condition_name,
                 "task_index": idx,
@@ -432,13 +442,32 @@ def run_condition(
                 "injection_suppressed_types": len(
                     library._injection_suppressed  # noqa: SLF001
                 ),
-                "failure_type": str(exc)[:200],
+                # Category (auth, rate_limit, output_truncated, ...) plus the
+                # raw message; earlier checkpoints stored the message here.
+                "failure_type": failure_type,
+                "error": str(exc)[:200],
                 "wall_time_s": round(wall, 2),
             }
             print(
-                "  [%2d/%d] ERROR %-25s :: %s"
-                % (idx + 1, n_tasks, ep["task_type"][:25], str(exc)[:120])
+                "  [%2d/%d] ERROR [%s] %-25s :: %s"
+                % (idx + 1, n_tasks, failure_type, ep["task_type"][:25], str(exc)[:120])
             )
+            consecutive_errors += 1
+            if fatal or consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                episodes.append(ep)
+                if output_dir is not None:
+                    _save_checkpoint(output_dir, condition_name, episodes, library)
+                reason = (
+                    "fatal LLM error (%s)" % failure_type
+                    if fatal
+                    else "%d consecutive errors" % consecutive_errors
+                )
+                raise RunAborted(
+                    "%s aborted after %d/%d episodes: %s -- %s"
+                    % (condition_name, len(episodes), n_tasks, reason, str(exc)[:200])
+                ) from exc
+        else:
+            consecutive_errors = 0
 
         episodes.append(ep)
 
@@ -750,15 +779,25 @@ def main() -> None:
 
     all_eps: dict[str, list[dict[str, Any]]] = {}
     grand_t0 = time.time()
+    aborted: str | None = None
 
     for cond in args.conditions:
         if cond not in CONDITIONS:
             print("  [warn] Unknown condition '%s' — skipping." % cond)
             continue
-        eps = run_condition(
-            cond, CONDITIONS[cond], llm, args.limit, args.max_steps,
-            output_dir=output_dir,
-        )
+        try:
+            eps = run_condition(
+                cond, CONDITIONS[cond], llm, args.limit, args.max_steps,
+                output_dir=output_dir,
+            )
+        except RunAborted as exc:
+            # Fatal LLM error or too many consecutive errors: the checkpoint
+            # is on disk; stop the whole run rather than burn the next
+            # conditions against a broken endpoint.
+            aborted = str(exc)
+            print("\nRUN ABORTED -- %s" % aborted, file=sys.stderr)
+            print("Partial checkpoints are in %s; re-run to resume." % output_dir, file=sys.stderr)
+            break
         all_eps[cond] = eps
         s = _summary(eps)
         print(
@@ -798,7 +837,10 @@ def main() -> None:
         "\nTotal wall: %.0fs (%.1f min)"
         % (grand_wall, grand_wall / 60.0)
     )
-    generate_report(all_eps, output_dir, filename_suffix=suffix)
+    if all_eps:
+        generate_report(all_eps, output_dir, filename_suffix=suffix)
+    if aborted:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
