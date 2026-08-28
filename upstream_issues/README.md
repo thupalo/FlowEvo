@@ -11,6 +11,7 @@ implementation* section naming its commit.
 
 | # | file | kind | scope | repro risk | fork commit |
 |---|---|---|---|---|---|
+| 00 | [00-umbrella-issue.md](00-umbrella-issue.md) | single umbrella issue (paste-ready) | all of the below | — | `main` |
 | 01 | [01-reasoning-models-typed-client-errors.md](01-reasoning-models-typed-client-errors.md) | issue → 3 PRs | `src/runtime/` | none (opt-in) | `e7ba952` |
 | 02 | [02-openai-compatible-provider.md](02-openai-compatible-provider.md) | issue / small PR | `src/runtime/`, README | none | `fc0a045` |
 | 03 | [03-alfworld-hardcoded-output-budgets.md](03-alfworld-hardcoded-output-budgets.md) | issue → PR | `src/runtime/config.py`, `src/alfworld_/` | none (defaults kept) | `2e440f7` |
