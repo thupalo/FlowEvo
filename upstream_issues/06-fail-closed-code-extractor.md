@@ -16,12 +16,19 @@ The same bug class appeared in a fork adapter: a fallback regex `\b(SELECT|WITH)
 One shared helper in `src/core/utils.py`:
 
 ```python
-def extract_fenced_code(text: str, *, lang: str = "python", start_re: str = r"^\s*(def |class |import |from )") -> str:
-    """Return the first fenced block; else text from the first line matching start_re; else ''."""
+def extract_fenced_code(text: str, *, lang: str = "python") -> str:
+    """1. first fence tagged `lang` or untagged; 2. any other fence;
+    3. the raw text only if it looks like code; else ''."""
 ```
+
+"Looks like code" is a deliberately loose heuristic — a line starting with a Python keyword or decorator, or containing `=` / `(` — because HumanEval replies are often an unfenced, indented function *body* with no `def`, and a strict `^def ` start pattern would wrongly discard those. Prose such as "I cannot help with that." or a reasoning preamble cut off before the fence yields `""`.
 
 `code_math.extract_code` and any future adapter use it and treat `""` as an *empty output* failure type (see the runners issue) rather than sending prose to the sandbox.
 
 ## Reproducibility risk
 
 Low but non-zero: a prose reply currently fails the tests; after the change it fails as `empty_output` instead. Pass/fail outcome is the same; token accounting is the same; only the failure category differs. Worth stating in the PR.
+
+## Reference implementation
+
+`thupalo/FlowEvo`, branch `core/upstream-backlog`, commit `848abc9`, with 8 tests (`tests/core/test_extract_fenced_code.py`) covering indentation preservation, tag preference, unfenced bodies, prose, and truncated-before-fence replies.

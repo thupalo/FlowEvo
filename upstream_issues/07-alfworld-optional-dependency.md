@@ -24,3 +24,7 @@ alfworld-download          # game files, once
 ## Reproducibility risk
 
 None.
+
+## Reference implementation
+
+`thupalo/FlowEvo`, branch `core/upstream-backlog`, commit `ff77f64` (cherry-pickable as-is).

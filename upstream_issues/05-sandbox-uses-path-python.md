@@ -32,3 +32,7 @@ Two lines; the explicit-argument path is unchanged.
 ## Reproducibility risk
 
 None for environments where `python` already resolved to the experiment interpreter; otherwise it *fixes* a silent divergence.
+
+## Reference implementation
+
+`thupalo/FlowEvo`, branch `core/upstream-backlog`, commit `c32ee79` (cherry-pickable as-is).

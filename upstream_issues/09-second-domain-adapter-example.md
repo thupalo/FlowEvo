@@ -4,7 +4,7 @@
 
 The repository ships one domain adapter (ALFWorld) alongside the code/math benchmark runner. Both need external datasets or simulators, and the generic `src/agent` / `src/compiler` stack is specialised to Python-function tasks. A second adapter that is small, dependency-free and offline-testable would show how to apply the compile → replay → govern loop to a new domain, which is the paper's main claim.
 
-I have such an adapter in my fork (`thupalo/FlowEvo`, folder `democase_sql/`, 16 files, no changes under `src/`) and would like to know whether, and in what form, you would accept it.
+I have such an adapter in my fork (`thupalo/FlowEvo`, folder `democase_sql/`, 16 files) and would like to know whether, and in what form, you would accept it. Its only dependency on core beyond `runtime.config` / `runtime.llm_client` is the `runtime/errors.py` module proposed in the reasoning-models issue; if that is not adopted, the adapter can carry its own copy (it originally did).
 
 ## What it is
 
@@ -31,4 +31,4 @@ I have such an adapter in my fork (`thupalo/FlowEvo`, folder `democase_sql/`, 16
 
 ## Reproducibility risk
 
-None — additive folder, no `src/` changes.
+None — additive folder; the benchmark runners are untouched.

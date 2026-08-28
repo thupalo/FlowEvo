@@ -21,8 +21,12 @@ Depends on the typed-error classification from the reasoning-models issue (`runt
 - Add `failure_type` to the episode dict and a per-condition breakdown (`{execution_error: 3, output_truncated: 2, ...}`) to `generate_report`.
 - Exit code: 0 ok, 1 aborted, 2 config error.
 
-A working version of this policy (with tests: recorded retryable error, abort on fatal, abort after 3 consecutive, partial checkpoint persisted) is in the fork `thupalo/FlowEvo` → `democase_sql/runner.py`.
+One schema note for ALFWorld: its error episodes currently store the raw exception message in `failure_type`. Proposal: `failure_type` becomes the category and the message moves to a new `error` key. Old checkpoints still load (the field is only read for reporting).
 
 ## Reproducibility risk
 
 None: successful runs are unchanged; only the bookkeeping of failed/aborted runs differs.
+
+## Reference implementation
+
+`thupalo/FlowEvo`, branch `core/upstream-backlog`, commit `02e8a45`: both runners record `failure_type` (`verification_failed`, `empty_output`, or the `runtime.errors` kind), abort via `RunAborted` on fatal kinds or `MAX_CONSECUTIVE_ERRORS = 3` after saving the checkpoint, `code_math` exits 1/2 and gains a "Failure types" report column, ALFWorld exits 1 and still writes the report for completed conditions. Tests in `tests/code_math/test_runner_policy.py` drive `run_condition` with a scripted LLM (fatal abort + checkpoint persisted, consecutive abort, isolated transport error recorded, prose reply → `empty_output`). Depends on the `runtime/errors.py` module from the reasoning-models issue.

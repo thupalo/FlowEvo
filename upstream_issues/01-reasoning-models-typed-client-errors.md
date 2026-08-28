@@ -52,18 +52,24 @@ class LLMResponse:
     reasoning: str = ""
 
 class LLMClientError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int | None = None) -> None: ...
+    def __init__(self, message: str, *, status_code: int | None = None, finish_reason: str = "") -> None: ...
 ```
+
+The empty-content message should also carry the detail (`finish_reason=length reasoning_chars=2562`) so plain logs are diagnosable.
 
 Populate from `choices[0].finish_reason` and `message.reasoning` / `message.reasoning_content`. No behaviour change.
 
-**PR 2 — `src/runtime/errors.py`**: classify failures into kinds `empty_output`, `output_truncated`, `context_length`, `rate_limit`, `server_error`, `transport`, `auth`, `bad_request`, `malformed_response`, with `fatal` / `retryable` flags. A tested implementation exists in the fork: `thupalo/FlowEvo` → `democase_sql/errors.py` (+ 21 tests using a scripted fake client).
+**PR 2 — `src/runtime/errors.py`**: classify failures into kinds `empty_output`, `output_truncated`, `output_budget_exhausted`, `context_length`, `rate_limit`, `server_error`, `transport`, `auth`, `bad_request`, `malformed_response`, with `fatal` / `retryable` flags; prefer the structured `status_code` / `finish_reason` attributes from PR 1 and fall back to parsing the message. Also a `RunAborted` exception for experiment loops (see the runners issue).
 
-**PR 3 — opt-in budget growth**: `LLMClient.generate(..., grow_on_truncation: bool = False)`; when `finish_reason == "length"` and content is empty, retry with `max_tokens` doubled, capped (e.g. 16384), at most 2–3 times. Expose as `llm.grow_on_truncation` in the YAML config. **Default off** so published experiment numbers are unchanged.
+**PR 3 — opt-in budget growth**: config keys `llm.grow_on_truncation: false` and `llm.max_output_tokens_cap: 16384`. When enabled and the reply has `finish_reason == "length"`, retry with `max_tokens` doubled, at most 3 steps, up to the cap. The trigger must be `finish_reason` alone, **not** "content is empty": while verifying we saw an intermediate budget return *non-empty content cut off mid-answer* with `finish_reason == "length"`; growing only on empty content would have returned that truncated text as a complete answer. **Default off** so published experiment numbers are unchanged.
 
 ## Reproducibility risk
 
 PR 1 and PR 2: none (additive). PR 3: none while the flag is off; document that enabling it changes token accounting.
+
+## Reference implementation
+
+Fork `thupalo/FlowEvo`, branch `core/upstream-backlog`, commit `e7ba952` (PR https://github.com/thupalo/FlowEvo/pull/3): all three parts in one commit — `LLMResponse.finish_reason/reasoning`, `LLMClientError(status_code=, finish_reason=)`, `src/runtime/errors.py` (`classify_client_error`, `LLMGenerationError.from_client_error`, `RunAborted`), growth loop in `_generate_openai_chat` with the HTTP retry factored into `_post_with_retries`. 20 unit tests with a monkeypatched `requests.post`; verified live against a local Nemotron-3.5 server (`max_tokens=150`: default raises with `finish_reason="length"`, growth returns a complete, verifier-passing answer). Splitting into the three PRs above is straightforward from that commit.
 
 ## Related
 

@@ -33,6 +33,10 @@ llm:
 
 None when the defaults are unchanged; the paper configuration remains the default.
 
+## Reference implementation
+
+`thupalo/FlowEvo`, branch `core/upstream-backlog`, commit `2e440f7`: `AlfWorldGenerationBudgets` dataclass on `RuntimeLLMConfig.alfworld`, `alfworld_budgets(llm_client)` helper that falls back to the defaults for stub clients (tests), and the three call sites reading through it. Existing YAML files need no change.
+
 ## Related
 
 - Reasoning-model support in the runtime (separate issue) — necessary but not sufficient for ALFWorld because of these constants.

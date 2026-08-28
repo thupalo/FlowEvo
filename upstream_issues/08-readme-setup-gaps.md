@@ -14,3 +14,7 @@ A few things a new user hits in the first hour that the README could pre-empt. D
 ## Reproducibility risk
 
 None (docs only).
+
+## Reference implementation
+
+`thupalo/FlowEvo`, branch `core/upstream-backlog`: items 2, 3, 5 and 6 in commit `f62f5b9` (README sections *Local / self-hosted models*, *Reasoning models*, *Quick check*, gitignore note, plus commented recipes in `configs/local.example.yaml`); item 4 in `ff77f64`; item 1 (runner docstrings vs README invocation) in a follow-up commit on the same branch.

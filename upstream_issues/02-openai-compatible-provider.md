@@ -34,7 +34,11 @@ llm:
 
 ## Scope / reproducibility risk
 
-~15 lines + docs. No behavioural change for OpenRouter users.
+~15 lines + docs. No behavioural change for OpenRouter users (`provider: openrouter` with the hosted endpoint still requires the key and still sends the attribution headers).
+
+## Reference implementation
+
+`thupalo/FlowEvo`, branch `core/upstream-backlog`, commit `fc0a045` (code; README recipe in `f62f5b9`): `SUPPORTED_PROVIDERS = {"openrouter", "openai_compatible"}`, `is_openrouter_endpoint(base_url)`, `_request_headers()` sends `Authorization` only when a key is set and the attribution headers only for `openrouter.ai`, `_generate_openrouter` renamed `_generate_openai_chat`; config tests cover local-without-key, alias-with-custom-URL, and hosted-requires-key.
 
 ## Related
 
